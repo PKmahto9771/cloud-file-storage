@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>File Versions</title>
+</head>
+<body>
+  <h3>File Versions</h3>
+
+  <table border="1">
+    <thead>
+      <tr>
+        <th>Version</th>
+        <th>Original Name</th>
+        <th>Uploaded At</th>
+        <th>Download</th>
+        <th>Delete</th>
+        <th>Signed-url</th>
+        <th>Share</th>
+        <th>Revoke</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% versions.forEach(file => { %>
+        <tr>
+          <td><%= file.version %></td>
+          <td><%= file.originalName %></td>
+          <td><%= new Date(file.uploadedAt).toLocaleString() %></td>
+          <td><a href="/api/files/download/<%= file.storageKey %>">Download</a></td>
+          <td><form action="/api/files/<%= file.storageKey %>?_method=DELETE" method="POST">
+                <button type="submit">Delete</button>
+              </form>
+          </td>
+          <td><a href="/api/files/signed-url/<%= file.storageKey %>">Link</a></td>
+          <td><form action="/api/files/share/<%= file._id %>?_method=POST" method="POST">
+                <button type="submit">Get Link</button>
+              </form>
+          </td>
+          <td><form action="/api/files/unshare/<%= file._id %>?_method=POST" method="POST">
+                <button type="submit">Revoke</button>
+              </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</body>
+</html>
