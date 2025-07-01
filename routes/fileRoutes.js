@@ -26,26 +26,52 @@ router.get('/download', checkAuth, (req, res) => {
 });
 
 router.post('/upload', checkAuth, upload.single('file'), async (req, res) => {
+    console.log('📤 Starting file upload process...');
+    
     try {
       const file = req.file;
       const userId = req.user._id;
       const originalName = file.originalname;
       const folderId = req.body.folderId || null;
+      
+      console.log('📋 Upload details:', {
+        originalName,
+        size: file.size,
+        mimetype: file.mimetype,
+        userId,
+        folderId
+      });
+  
+      // Critical validation
+      if (!file) {
+        console.error('❌ No file provided in upload');
+        return res.status(400).json({ message: 'No file provided' });
+      }
   
       // Extract base name and extension
       const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
       const extension = originalName.split('.').pop();
+      console.log('🏷️ File name parsing:', { baseName, extension });
   
       // Check if a file with the same name was uploaded before
+      console.log('🔍 Checking for existing files...');
       const existingFile = await File.findOne({ userId, originalName, folderId }).sort({ version: -1 });
   
       const version = existingFile ? existingFile.version + 1 : 1;
       const fileGroupId = existingFile ? existingFile.fileGroupId : crypto.randomUUID();
+      
+      console.log('📝 Version info:', {
+        hasExisting: !!existingFile,
+        version,
+        fileGroupId
+      });
   
       // Create versioned key for storage
       const versionedKey = `${baseName}_v${version}.${extension}`;
+      console.log('🔑 Generated versioned key:', versionedKey);
   
-      // Upload file to R2
+      // Upload file to R2 - CRITICAL OPERATION
+      console.log('☁️ Uploading to R2...');
       const r2Response = await uploadFile(file, versionedKey);
 
       // Save file metadata to DB

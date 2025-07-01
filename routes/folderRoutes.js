@@ -8,101 +8,158 @@ const router = express.Router();
 
 router.post('/', checkAuth, async(req, res) => {
     const {name, parentId} = req.body;
+    console.log('🗂️ Creating new folder:', { name, parentId, userId: req.user._id });
 
     try{
+        // Critical validation
+        if (!name || name.trim() === '') {
+            console.error('❌ Invalid folder name provided:', name);
+            return res.status(400).json({ message: 'Folder name is required' });
+        }
+
         const newFolder = new Folder({
             name,
             userId: req.user._id,
             parentId: parentId || null,       
         });
 
+        console.log('💾 Saving folder to database...');
         await newFolder.save();
+        console.log('✅ Folder created successfully:', newFolder._id);
 
         res.status(201).json({ message: 'Folder created', folder: newFolder });
     }
     catch(err){
+        console.error('❌ Error creating folder:', {
+            name,
+            parentId,
+            userId: req.user._id,
+            error: err.message,
+            stack: err.stack
+        });
         res.status(500).json({ message: 'Error creating folder', error: err.message });
     }
 })
 
 router.get('/', checkAuth, async (req, res) => {
-  
-    const folders = await Folder.find({ parentId: null, userId: req.user._id });
-    const files = await File.aggregate([
-        {
-          $match: {
-            folderId: new mongoose.Types.ObjectId(null),
-            userId: new mongoose.Types.ObjectId(req.user._id)
-          }
-        },
-        { $sort: { version: -1 } }, 
-        {
-          $group: {
-            _id: "$fileGroupId",
-            file: { $first: "$$ROOT" }
-          }
-        },
-        {
-          $replaceRoot: { newRoot: "$file" } 
-        },
-        {
-          $sort: { uploadedAt: -1 }
+    console.log('📁 Fetching root folder contents for user:', req.user._id);
+    
+    try {
+        const folders = await Folder.find({ parentId: null, userId: req.user._id });
+        console.log('✅ Found folders:', folders.length);
+        
+        const files = await File.aggregate([
+            {
+              $match: {
+                folderId: new mongoose.Types.ObjectId(null),
+                userId: new mongoose.Types.ObjectId(req.user._id)
+              }
+            },
+            { $sort: { version: -1 } }, 
+            {
+              $group: {
+                _id: "$fileGroupId",
+                file: { $first: "$$ROOT" }
+              }
+            },
+            {
+              $replaceRoot: { newRoot: "$file" } 
+            },
+            {
+              $sort: { uploadedAt: -1 }
+            }
+          ]);
+        console.log('✅ Found files:', files.length);
+          
+        // Fetch breadcrumb
+        let breadcrumbs = [];
+        let currentId = null;
+        while (currentId) {
+          const folder = await Folder.findById(currentId);
+          if (!folder) break;
+          breadcrumbs.unshift({ name: folder.name, _id: folder._id });
+          currentId = folder.parentId;
         }
-      ]);
       
-  
-    // Fetch breadcrumb
-    let breadcrumbs = [];
-    let currentId = null;
-    while (currentId) {
-      const folder = await Folder.findById(currentId);
-      if (!folder) break;
-      breadcrumbs.unshift({ name: folder.name, _id: folder._id });
-      currentId = folder.parentId;
+        console.log('🍞 Breadcrumbs generated:', breadcrumbs.length);
+        res.render('folder_view', { folders, files, breadcrumbs });
+    } catch (error) {
+        console.error('❌ Error fetching root folder:', {
+            userId: req.user._id,
+            error: error.message,
+            stack: error.stack
+        });
+        res.status(500).json({ message: 'Error fetching folder contents', error: error.message });
     }
-  
-    res.render('folder_view', { folders, files, breadcrumbs });
-});  
+});
 
 router.get('/:folderId', checkAuth, async (req, res) => {
     const folderId = req.params.folderId || null;
+    console.log('📁 Fetching folder contents:', { folderId, userId: req.user._id });
   
-    const folders = await Folder.find({ parentId: folderId, userId: req.user._id });
-    const files = await File.aggregate([
-        {
-          $match: {
-            folderId: new mongoose.Types.ObjectId(folderId),
-            userId: new mongoose.Types.ObjectId(req.user._id)
-          }
-        },
-        { $sort: { version: -1 } },
-        {
-          $group: {
-            _id: "$fileGroupId",
-            file: { $first: "$$ROOT" }
-          }
-        },
-        {
-          $replaceRoot: { newRoot: "$file" }
-        },
-        {
-          $sort: { uploadedAt: -1 }
+    try {
+        // Critical validation - check if folder exists and belongs to user
+        if (folderId) {
+            const folderExists = await Folder.findOne({ _id: folderId, userId: req.user._id });
+            if (!folderExists) {
+                console.error('❌ Folder not found or unauthorized:', folderId);
+                return res.status(404).json({ message: 'Folder not found' });
+            }
+            console.log('✅ Folder access validated:', folderExists.name);
         }
-      ]);
+
+        const folders = await Folder.find({ parentId: folderId, userId: req.user._id });
+        console.log('✅ Found subfolders:', folders.length);
+        
+        const files = await File.aggregate([
+            {
+              $match: {
+                folderId: new mongoose.Types.ObjectId(folderId),
+                userId: new mongoose.Types.ObjectId(req.user._id)
+              }
+            },
+            { $sort: { version: -1 } },
+            {
+              $group: {
+                _id: "$fileGroupId",
+                file: { $first: "$$ROOT" }
+              }
+            },
+            {
+              $replaceRoot: { newRoot: "$file" }
+            },
+            {
+              $sort: { uploadedAt: -1 }
+            }
+          ]);
+        console.log('✅ Found files in folder:', files.length);
+          
+        // Fetch breadcrumb
+        let breadcrumbs = [];
+        let currentId = folderId;
+        console.log('🍞 Building breadcrumbs...');
+        while (currentId) {
+          const folder = await Folder.findById(currentId);
+          if (!folder) {
+            console.warn('⚠️ Breadcrumb folder not found:', currentId);
+            break;
+          }
+          breadcrumbs.unshift({ name: folder.name, _id: folder._id });
+          currentId = folder.parentId;
+        }
+        console.log('✅ Breadcrumbs built:', breadcrumbs.length);
       
-  
-    // Fetch breadcrumb
-    let breadcrumbs = [];
-    let currentId = folderId;
-    while (currentId) {
-      const folder = await Folder.findById(currentId);
-      if (!folder) break;
-      breadcrumbs.unshift({ name: folder.name, _id: folder._id });
-      currentId = folder.parentId;
+        res.render('folder_view', { folders, files, breadcrumbs });
+    } catch (error) {
+        console.error('❌ Error fetching folder contents:', {
+            folderId,
+            userId: req.user._id,
+            error: error.message,
+            stack: error.stack
+        });
+        res.status(500).json({ message: 'Error fetching folder contents', error: error.message });
     }
-  
-    res.render('folder_view', { folders, files, breadcrumbs });
-});  
+});
 
 router.get('/:parentId/contents', async(req, res) => {
     const parentId = req.params.parentId === 'root' ? null : req.params.parentId;
